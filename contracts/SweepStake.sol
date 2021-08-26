@@ -4,83 +4,130 @@ pragma abicoder v2;
 contract SweepStake{
 	
 	struct SweepStakeParticipant{
-		address _address;
 		string name;
 		string memID;
 	}
 
-	address[] public participants;
+	address payable[] public _participants;
 
+	address public _owner;
+	
 	uint public _numParticipants;
 
-	mapping (address => SweepStakeParticipant) _participants;
+	mapping (address => SweepStakeParticipant) _mapParticipants;
 
 	// Event to record a new participant entry
 	event ParticipantEntry (address _address);
 
 	// Event to record winner
 	event RecordWinner (address _address);
+	
+	// Event to record Addition of Price addPrizePool
+	event AddPrize (uint value);
+	
+	//Debugging event
+	event RandomNumber (uint value);
 
-	constructor() {
+	constructor() payable {
 		_numParticipants = 0;
+		_owner = msg.sender;
 	}
 
-	function enterSweepStake (string memory _name, string memory _memID) public returns (bool success){
-		SweepStakeParticipant memory myDetails = SweepStakeParticipant(msg.sender, _name, _memID);
-		_participants[msg.sender] = myDetails;
-		participants.push(msg.sender);
+	function enterSweepStake (string memory _name, string memory _memID) public returns (bool ){
+		SweepStakeParticipant memory myDetails = SweepStakeParticipant(_name, _memID);
+		_mapParticipants[msg.sender] = myDetails;
+		_participants.push(payable(msg.sender));
 		_numParticipants += 1;
 		emit ParticipantEntry(msg.sender);
 		return true;
 	}
 
-	function checkMyEntry () public returns (string memory _name, string memory _memID){
-		for (uint i=0; i<participants.length; i++)
+	function checkMyEntry () public view returns (string memory _name, string memory _memID){
+		for (uint i=0; i<_participants.length; i++)
 		{
-			if(participants[i] == msg.sender)
+			if(_participants[i] == msg.sender)
 			{
-				return (_participants[msg.sender].name, _participants[msg.sender].memID);
+				return (_mapParticipants[msg.sender].name, _mapParticipants[msg.sender].memID);
 			}
 
 		}
 		return ("No logs exist", "No logs exist");
 	}
 
-	function getWinners (string memory bitcoinBlockHash, uint numWinners) public view returns (string[] memory){
+	function getWinners (string memory bitcoinBlockHash, uint numWinners) public returns (uint[] memory){
 		bytes32 random = keccak256(abi.encodePacked(bitcoinBlockHash));
 
-		uint numParticipants = participants.length;
-
-		uint[] memory allNumbers = new uint[](numParticipants);
+		uint[] memory allNumbers = new uint[](_numParticipants);
 
 		uint[] memory winNumbers = new uint[](numWinners);
 
-		for(uint i=0; i<numParticipants; i++)
+		for(uint i=0; i<_numParticipants; i++)
 		{
 			allNumbers[i] = i;
 		}
 
 		for(uint i=0; i<numWinners; i++)
 		{
-			uint n = numParticipants - 1;
+			uint n = _numParticipants - 1;
 
-			uint r = (uint8(random[random.length - i * 4]) + (uint8(random[random.length - i * 4 - 1]) << 8) + (uint8(random[random.length - i * 4 - 2]) << 16) + (uint8(random[random.length - i * 4 - 3]) << 24)) % n;
+			uint r = (uint8(random[i * 4]) + (uint8(random[i * 4 + 1]) << 8) + (uint8(random[i * 4 + 2]) << 16) + (uint8(random[i * 4 + 3]) << 24)) % n;
 
+			emit RandomNumber(r);
+			
 			winNumbers[i] = allNumbers[r];
 
             allNumbers[r] = allNumbers[n - 1];
 
 		}
 
-		string[] memory Winners = new string[](numWinners);
+		/*string[] memory Winners = new string[](numWinners);
 
 		for(uint i=0; i<numWinners; i++)
 		{
-			Winners[i] = _participants[participants[uint(winNumbers[i])]].name;
-		}
+			Winners[i] = _mapParticipants[_participants[uint(winNumbers[i])]].name;
+		}*/
+        
+		return winNumbers;
 
-		return Winners;
-
+	}
+	
+	function addPrizePool () public payable OnlyOwner returns (bool success){
+	    emit AddPrize(msg.value);
+	    return true;
+	}
+	
+	modifier OnlyOwner (){
+	    require (msg.sender == _owner, "This can be performed only by the Owner");
+	    _;
+	}
+	
+	function getBalance () public view returns (uint){
+	    return address(this).balance;
+	}
+	
+	function payWinners (string memory bitcoinBlockHash, uint numWinners) public OnlyOwner returns (string[] memory) {
+	    uint[] memory winnerIndices = getWinners(bitcoinBlockHash, numWinners);
+	    
+	    string[] memory Winners = new string[](numWinners);
+	    
+	    for(uint i=0; i<numWinners; i++)
+	    {
+	        Winners[i] = _mapParticipants[_participants[winnerIndices[i]]].memID;
+	    }
+	    
+	    uint transferAmt = (address(this).balance)/numWinners;
+	    
+	    for(uint i=0; i<numWinners; i++)
+	    {
+	        //account payable payee = _participants[winnerIndices[i]];
+	        //require(_participants[winnerIndices[i]].call.value(transferAmt).gas(35000)());
+	        (bool success, ) = _participants[winnerIndices[i]].call{value:transferAmt}("Winnings");
+            require(success, "Transfer failed.");
+	    }
+	    
+	    return Winners;
+	    
+	    //_participants[winnerIndices[0]].transfer(transfer1);
 	}
 
 }
